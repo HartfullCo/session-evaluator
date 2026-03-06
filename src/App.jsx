@@ -99,6 +99,62 @@ async function evaluateProposal(proposal) {
   return JSON.parse(text.replace(/```json|```/g, "").trim());
 }
 
+const OVERLAP_SYSTEM_PROMPT = `You are a senior conference program director reviewing a full session lineup for overlap, redundancy, and format conflicts.
+
+Your job is to look ACROSS all sessions together and identify:
+- Sessions covering the same topic, workflow, or skill (even if framed differently)
+- Sessions that could be merged into one stronger session
+- Sessions that could be split by level (Beginner vs Advanced) to serve different audiences
+- Sessions where a format change would eliminate the overlap (e.g. two talks on onboarding → one Talk + one Hands-On Clinic)
+- Gaps in the lineup worth flagging (missing tracks, levels, or formats)
+
+For each overlap group you find, be specific: name the session numbers, explain WHY they overlap, and give a concrete recommendation.
+
+Respond ONLY with valid JSON. No markdown, no preamble, no backticks. Use this structure:
+{
+  "overlap_groups": [
+    {
+      "session_ids": [<array of session id numbers that overlap>],
+      "overlap_reason": "<why these sessions overlap — topic, workflow, audience, or format>",
+      "recommendation": "<merge / split by level / differentiate by format / keep both with changes>",
+      "action": "<specific actionable instruction: e.g. 'Merge sessions 1 and 5 into a single Advanced Case Study on agent reliability' or 'Keep both but reposition #3 as a Hands-On Clinic for beginners'>",
+      "severity": "high" or "medium" or "low"
+    }
+  ],
+  "gaps": [
+    "<one sentence describing a missing topic, track, level, or format that would strengthen the lineup>"
+  ],
+  "summary": "<2-3 sentence overall assessment of lineup health — what's strong, what needs work>"
+}
+
+If there are no overlaps, return an empty overlap_groups array. Always include gaps and summary.`;
+
+async function runOverlapAnalysis(proposals, results) {
+  const lineup = proposals.map(p => {
+    const r = results[p.id];
+    return `Session ${p.id}: "${p.title}"
+Abstract: ${p.abstract}
+Decision: ${r?.decision || "Not evaluated"}
+Track: ${r?.track || "Unknown"}
+Format: ${r?.format || "Unknown"}
+Level: ${r?.level || "Unknown"}`;
+  }).join("\n\n");
+
+  const response = await fetch("/api/claude", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 2000,
+      system: OVERLAP_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: `Analyze this full session lineup for overlaps, redundancy, and gaps:\n\n${lineup}` }]
+    })
+  });
+  const data = await response.json();
+  const text = data.content?.map(b => b.text || "").join("") || "";
+  return JSON.parse(text.replace(/```json|```/g, "").trim());
+}
+
 const ScorePip = ({ score }) => (
   <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
     {[1,2,3,4,5].map(i => (
@@ -148,22 +204,25 @@ export default function SessionEvaluator() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newAbstract, setNewAbstract] = useState("");
+  const [overlapAnalysis, setOverlapAnalysis] = useState(null);
+  const [runningOverlap, setRunningOverlap] = useState(false);
+  const [decisions, setDecisions] = useState({});
+  const [speakerInfo, setSpeakerInfo] = useState({});
+  const [workflowStatus, setWorkflowStatus] = useState({});
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newCompany, setNewCompany] = useState("");
 
   const addSession = () => {
     if (!newTitle.trim() || !newAbstract.trim()) return;
     const newId = proposals.length > 0 ? Math.max(...proposals.map(p => p.id)) + 1 : 1;
     setProposals(prev => [...prev, { id: newId, title: newTitle.trim(), abstract: newAbstract.trim() }]);
-    setNewTitle("");
-    setNewAbstract("");
+    if (newName.trim() || newEmail.trim() || newCompany.trim()) {
+      setSpeakerInfo(s => ({ ...s, [newId]: { name: newName.trim(), email: newEmail.trim(), company: newCompany.trim() } }));
+    }
+    setWorkflowStatus(ws => ({ ...ws, [newId]: "Pending" }));
+    setNewTitle(""); setNewAbstract(""); setNewName(""); setNewEmail(""); setNewCompany("");
     setShowAddForm(false);
-  };
-
-  const removeSession = (id) => {
-    setProposals(prev => prev.filter(p => p.id !== id));
-    setResults(r => { const n = {...r}; delete n[id]; return n; });
-    setStatuses(s => { const n = {...s}; delete n[id]; return n; });
-    setNotes(n => { const x = {...n}; delete x[id]; return x; });
-    if (expanded === id) setExpanded(null);
   };
 
   const runOne = useCallback(async (proposal) => {
@@ -183,10 +242,22 @@ export default function SessionEvaluator() {
     setRunning(false);
   }, [proposals, runOne]);
 
+  const handleRunOverlap = useCallback(async () => {
+    setRunningOverlap(true);
+    setActiveTab("overlaps");
+    try {
+      const analysis = await runOverlapAnalysis(proposals, results);
+      setOverlapAnalysis(analysis);
+    } catch {
+      setOverlapAnalysis({ error: true });
+    }
+    setRunningOverlap(false);
+  }, [proposals, results]);
+
   const doneCount = Object.values(statuses).filter(s => s === "done").length;
   const accepted = Object.values(results).filter(r => r.decision === "ACCEPT").length;
   const rejected = Object.values(results).filter(r => r.decision === "REJECT").length;
-  const overlapSessions = proposals.filter(p => results[p.id]?.overlap_note);
+  const overlapCount = overlapAnalysis?.overlap_groups?.length || 0;
 
   return (
     <div style={{ minHeight: "100vh", background: "#0F0F0F", color: "#E8E2D9", fontFamily: "'Georgia', serif", padding: "36px 28px" }}>
@@ -208,7 +279,7 @@ export default function SessionEvaluator() {
             <h1 style={{ margin: 0, fontSize: 25, fontWeight: 400, letterSpacing: "-0.02em" }}>Session Proposal Evaluator</h1>
             <div style={{ marginTop: 6, fontSize: 12, color: "#666", fontFamily: "monospace" }}>
               {proposals.length} sessions · {doneCount} evaluated
-              {doneCount > 0 && <> · <span style={{ color: "#4ade80" }}>{accepted} accepted</span> · <span style={{ color: "#f87171" }}>{rejected} rejected</span> · <span style={{ color: "#fbbf24" }}>{overlapSessions.length} overlaps</span></>}
+              {doneCount > 0 && <> · <span style={{ color: "#4ade80" }}>{accepted} accepted</span> · <span style={{ color: "#f87171" }}>{rejected} rejected</span> · <span style={{ color: "#fbbf24" }}>{overlapCount} overlaps</span></>}
             </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
@@ -234,37 +305,25 @@ export default function SessionEvaluator() {
           <div style={{ marginTop: 20, padding: "18px 20px", background: "rgba(232,113,42,0.05)", border: "1px solid rgba(232,113,42,0.2)", borderRadius: 5 }}>
             <div style={{ fontSize: 10, color: "#E8712A", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 12 }}>Add New Session</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <input
-                value={newTitle}
-                onChange={e => setNewTitle(e.target.value)}
-                placeholder="Session title"
-                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#E8E2D9", fontSize: 13, padding: "10px 12px", fontFamily: "Georgia, serif", width: "100%", boxSizing: "border-box" }}
-              />
-              <textarea
-                value={newAbstract}
-                onChange={e => setNewAbstract(e.target.value)}
-                placeholder="Session abstract — describe what will be covered, what attendees will build or learn, and what they'll leave with"
-                rows={4}
-                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#E8E2D9", fontSize: 13, padding: "10px 12px", fontFamily: "Georgia, serif", width: "100%", boxSizing: "border-box" }}
-              />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Speaker name" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#E8E2D9", fontSize: 13, padding: "10px 12px", fontFamily: "Georgia, serif", boxSizing: "border-box" }} />
+                <input value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="Speaker email" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#E8E2D9", fontSize: 13, padding: "10px 12px", fontFamily: "Georgia, serif", boxSizing: "border-box" }} />
+                <input value={newCompany} onChange={e => setNewCompany(e.target.value)} placeholder="Company / website (optional)" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#E8E2D9", fontSize: 13, padding: "10px 12px", fontFamily: "Georgia, serif", boxSizing: "border-box" }} />
+              </div>
+              <input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="Session title" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#E8E2D9", fontSize: 13, padding: "10px 12px", fontFamily: "Georgia, serif", width: "100%", boxSizing: "border-box" }} />
+              <textarea value={newAbstract} onChange={e => setNewAbstract(e.target.value)} placeholder="Session abstract — describe what will be covered, what attendees will build or learn, and what they'll leave with" rows={4} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#E8E2D9", fontSize: 13, padding: "10px 12px", fontFamily: "Georgia, serif", width: "100%", boxSizing: "border-box" }} />
               <div style={{ display: "flex", gap: 10 }}>
-                <button className="btn" onClick={addSession} disabled={!newTitle.trim() || !newAbstract.trim()} style={{
-                  background: newTitle.trim() && newAbstract.trim() ? "#E8712A" : "#2a2a2a",
-                  color: newTitle.trim() && newAbstract.trim() ? "#fff" : "#555",
-                  border: "none", padding: "9px 20px", fontSize: 12, fontFamily: "monospace", borderRadius: 4
-                }}>Add to Queue</button>
-                <button className="btn" onClick={() => { setShowAddForm(false); setNewTitle(""); setNewAbstract(""); }} style={{
-                  background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "#888", padding: "9px 16px", fontSize: 12, fontFamily: "monospace", borderRadius: 4
-                }}>Cancel</button>
+                <button className="btn" onClick={addSession} disabled={!newTitle.trim() || !newAbstract.trim()} style={{ background: newTitle.trim() && newAbstract.trim() ? "#E8712A" : "#2a2a2a", color: newTitle.trim() && newAbstract.trim() ? "#fff" : "#555", border: "none", padding: "9px 20px", fontSize: 12, fontFamily: "monospace", borderRadius: 4 }}>Add to Queue</button>
+                <button className="btn" onClick={() => { setShowAddForm(false); setNewTitle(""); setNewAbstract(""); setNewName(""); setNewEmail(""); setNewCompany(""); }} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "#888", padding: "9px 16px", fontSize: 12, fontFamily: "monospace", borderRadius: 4 }}>Cancel</button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Tabs */}
+        {/* Tabs + Overlap Analysis Button */}
         {doneCount > 0 && (
-          <div style={{ display: "flex", gap: 4, marginTop: 18 }}>
-            {[["table", "All Sessions"], ["overlaps", `Overlaps & Fixes${overlapSessions.length > 0 ? ` (${overlapSessions.length})` : ""}`]].map(([val, label]) => (
+          <div style={{ display: "flex", gap: 4, marginTop: 18, alignItems: "center", flexWrap: "wrap" }}>
+            {[["table", "All Sessions"], ["overlaps", "Overlaps & Gaps"]].map(([val, label]) => (
               <button key={val} className="btn" onClick={() => setActiveTab(val)} style={{
                 background: activeTab === val ? "rgba(232,113,42,0.12)" : "transparent",
                 border: `1px solid ${activeTab === val ? "rgba(232,113,42,0.35)" : "rgba(255,255,255,0.08)"}`,
@@ -273,42 +332,125 @@ export default function SessionEvaluator() {
                 letterSpacing: "0.09em", borderRadius: 3, textTransform: "uppercase"
               }}>{label}</button>
             ))}
+            {doneCount === proposals.length && (
+              <button className="btn" onClick={handleRunOverlap} disabled={runningOverlap} style={{
+                background: runningOverlap ? "#1e1e1e" : "rgba(251,191,36,0.12)",
+                border: "1px solid rgba(251,191,36,0.35)",
+                color: runningOverlap ? "#555" : "#fbbf24",
+                padding: "5px 13px", fontSize: 10, fontFamily: "monospace",
+                letterSpacing: "0.09em", borderRadius: 3, marginLeft: 8,
+                cursor: runningOverlap ? "default" : "pointer"
+              }}>
+                {runningOverlap ? "⟳ Analyzing…" : "⚠ Run Cross-Session Overlap Analysis"}
+              </button>
+            )}
           </div>
         )}
       </div>
 
       {/* OVERLAPS TAB */}
       {activeTab === "overlaps" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {overlapSessions.length === 0
-            ? <div style={{ color: "#444", fontFamily: "monospace", fontSize: 12, padding: "20px 0" }}>No overlaps flagged yet — run evaluations first.</div>
-            : overlapSessions.map(p => {
-                const r = results[p.id];
-                return (
-                  <div key={p.id} style={{ padding: "16px 18px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 5 }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-                      <span style={{ fontFamily: "monospace", fontSize: 10, color: "#444" }}>#{p.id}</span>
-                      <span style={{ fontSize: 13 }}>{p.title}</span>
-                      <Badge label={r.decision} color={r.decision === "ACCEPT" ? "#4ade80" : "#f87171"} />
-                      {r.level && <Badge label={r.level} color={LEVEL_COLORS[r.level] || "#aaa"} />}
-                      {r.track && <Badge label={r.track} color={TRACK_COLORS[r.track] || "#aaa"} />}
-                    </div>
-                    <div style={{ padding: "10px 12px", background: "rgba(251,191,36,0.05)", border: "1px solid rgba(251,191,36,0.18)", borderRadius: 4, fontSize: 12, color: "#fde68a", lineHeight: 1.6, marginBottom: 10 }}>
-                      <span style={{ fontSize: 9, color: "#fbbf24", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "monospace", fontWeight: 700 }}>⚠ Overlap Note: </span>
-                      {r.overlap_note}
-                    </div>
-                    <div style={{ fontSize: 9, color: "#555", letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 5 }}>Your Resolution Notes</div>
-                    <textarea
-                      value={notes[`ov-${p.id}`] || ""}
-                      onChange={e => setNotes(n => ({ ...n, [`ov-${p.id}`]: e.target.value }))}
-                      placeholder="How you'd resolve this overlap — merge, split into beginner/advanced, reposition format…"
-                      rows={2}
-                      style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 3, color: "#E8E2D9", fontSize: 12, padding: "8px 10px", fontFamily: "monospace", boxSizing: "border-box" }}
-                    />
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {!overlapAnalysis && !runningOverlap && (
+            <div style={{ color: "#555", fontFamily: "monospace", fontSize: 12, padding: "20px 0" }}>
+              Run all session evaluations first, then click <span style={{ color: "#fbbf24" }}>⚠ Run Cross-Session Overlap Analysis</span> to see a full lineup assessment.
+            </div>
+          )}
+
+          {runningOverlap && (
+            <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "20px 0", color: "#888", fontFamily: "monospace", fontSize: 12 }}>
+              <div style={{ width: 16, height: 16, border: "2px solid rgba(251,191,36,0.25)", borderTopColor: "#fbbf24", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+              Analyzing full lineup for overlaps and gaps…
+            </div>
+          )}
+
+          {overlapAnalysis?.error && (
+            <div style={{ padding: "14px", background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 4, color: "#f87171", fontFamily: "monospace", fontSize: 12 }}>
+              Analysis failed — check your API key and try again.
+            </div>
+          )}
+
+          {overlapAnalysis && !overlapAnalysis.error && (
+            <>
+              {/* Summary */}
+              <div style={{ padding: "16px 18px", background: "rgba(232,113,42,0.05)", border: "1px solid rgba(232,113,42,0.2)", borderRadius: 5 }}>
+                <div style={{ fontSize: 9, color: "#E8712A", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 8 }}>Lineup Assessment</div>
+                <div style={{ fontSize: 13, color: "#ddd", lineHeight: 1.65 }}>{overlapAnalysis.summary}</div>
+              </div>
+
+              {/* Overlap Groups */}
+              {overlapAnalysis.overlap_groups?.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 9, color: "#555", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 10 }}>
+                    Overlap Groups ({overlapAnalysis.overlap_groups.length})
                   </div>
-                );
-              })
-          }
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {overlapAnalysis.overlap_groups.map((group, i) => {
+                      const severityColor = group.severity === "high" ? "#f87171" : group.severity === "medium" ? "#fbbf24" : "#94a3b8";
+                      return (
+                        <div key={i} style={{ padding: "14px 16px", background: "rgba(255,255,255,0.02)", border: `1px solid ${severityColor}33`, borderRadius: 5 }}>
+                          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+                            <Badge label={group.severity.toUpperCase()} color={severityColor} />
+                            <div style={{ display: "flex", gap: 6 }}>
+                              {group.session_ids.map(id => {
+                                const p = proposals.find(p => p.id === id);
+                                return p ? (
+                                  <span key={id} style={{ fontSize: 11, color: "#ddd", fontFamily: "monospace", background: "rgba(255,255,255,0.06)", padding: "2px 8px", borderRadius: 3 }}>
+                                    #{id} {p.title.length > 35 ? p.title.substring(0, 35) + "…" : p.title}
+                                  </span>
+                                ) : null;
+                              })}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 12, color: "#aaa", lineHeight: 1.6, marginBottom: 8 }}>
+                            <span style={{ color: "#777", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "monospace" }}>Why: </span>
+                            {group.overlap_reason}
+                          </div>
+                          <div style={{ padding: "10px 12px", background: `${severityColor}0d`, border: `1px solid ${severityColor}33`, borderRadius: 4, fontSize: 12, color: "#ddd", lineHeight: 1.6 }}>
+                            <span style={{ fontSize: 10, color: severityColor, textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "monospace", fontWeight: 700 }}>→ Action: </span>
+                            {group.action}
+                          </div>
+                          <div style={{ marginTop: 10 }}>
+                            <div style={{ fontSize: 9, color: "#555", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 4 }}>Your Notes</div>
+                            <textarea
+                              value={notes[`group-${i}`] || ""}
+                              onChange={e => setNotes(n => ({ ...n, [`group-${i}`]: e.target.value }))}
+                              placeholder="How you'd resolve this…"
+                              rows={2}
+                              style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 3, color: "#E8E2D9", fontSize: 12, padding: "8px 10px", fontFamily: "monospace", boxSizing: "border-box" }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {overlapAnalysis.overlap_groups?.length === 0 && (
+                <div style={{ padding: "14px", background: "rgba(74,222,128,0.05)", border: "1px solid rgba(74,222,128,0.2)", borderRadius: 4, color: "#4ade80", fontFamily: "monospace", fontSize: 12 }}>
+                  ✓ No significant overlaps detected in this lineup.
+                </div>
+              )}
+
+              {/* Gaps */}
+              {overlapAnalysis.gaps?.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 9, color: "#555", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 10 }}>
+                    Lineup Gaps ({overlapAnalysis.gaps.length})
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {overlapAnalysis.gaps.map((gap, i) => (
+                      <div key={i} style={{ display: "flex", gap: 10, padding: "10px 14px", background: "rgba(96,165,250,0.05)", border: "1px solid rgba(96,165,250,0.18)", borderRadius: 4 }}>
+                        <span style={{ color: "#60a5fa", flexShrink: 0 }}>◦</span>
+                        <span style={{ fontSize: 12, color: "#bbb", lineHeight: 1.55 }}>{gap}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -318,7 +460,7 @@ export default function SessionEvaluator() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.09)" }}>
-                {["#", "", "Session Title", "Decision", "Score", "Level", "Format", "Track", "Value Ladder", "Actionability", "Proof", "Anti-Fluff", ""].map((h, i) => (
+                {["#", "", "Session Title", "Rec.", "Score", "Level", "Format", "Track", "Value Ladder", "Actionability", "Proof", "Anti-Fluff", "Status", "Your Decision", ""].map((h, i) => (
                   <th key={i} style={{ padding: "8px 10px", textAlign: "left", color: "#444", fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: "monospace", fontWeight: 400, whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr>
@@ -338,7 +480,7 @@ export default function SessionEvaluator() {
                         <div style={{ fontSize: 12, lineHeight: 1.4 }}>{p.title}</div>
                         <div style={{ color: "#4a4a4a", fontSize: 10, marginTop: 2, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 210 }}>{p.abstract.substring(0, 70)}…</div>
                       </td>
-                      <td style={{ padding: "11px 10px" }}>{r ? <Badge label={r.decision} color={r.decision === "ACCEPT" ? "#4ade80" : "#f87171"} /> : <span style={{ color: "#2a2a2a" }}>—</span>}</td>
+                      <td style={{ padding: "11px 10px" }}>{r ? <Badge label={r.decision === "ACCEPT" ? "✓ Accept" : "✕ Reject"} color={r.decision === "ACCEPT" ? "#4ade80" : "#f87171"} /> : <span style={{ color: "#2a2a2a" }}>—</span>}</td>
                       <td style={{ padding: "11px 10px" }}>
                         {r ? <span style={{ fontFamily: "monospace", fontSize: 15, fontWeight: 700, color: r.overall >= 4 ? "#4ade80" : r.overall >= 2.5 ? "#fbbf24" : "#f87171" }}>{r.overall}</span> : <span style={{ color: "#2a2a2a" }}>—</span>}
                       </td>
@@ -349,6 +491,32 @@ export default function SessionEvaluator() {
                         <td key={k} style={{ padding: "11px 10px" }}>{r ? <ScorePip score={r.scores[k]} /> : <span style={{ color: "#1e1e1e" }}>—</span>}</td>
                       ))}
                       <td style={{ padding: "11px 10px" }}>
+                        {(() => {
+                          const statusColors = { Pending: "#94a3b8", "Needs Info": "#fbbf24", Accepted: "#4ade80", Rejected: "#f87171", Waitlisted: "#a78bfa" };
+                          const ws = workflowStatus[p.id] || (r ? "Pending" : null);
+                          return ws ? <Badge label={ws} color={statusColors[ws]} /> : <span style={{ color: "#2a2a2a" }}>—</span>;
+                        })()}
+                      </td>
+                      <td style={{ padding: "11px 10px" }}>
+                        {r && (
+                          decisions[p.id] ? (
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <Badge
+                                label={decisions[p.id] === "ACCEPT" ? "✓ Accepted" : "✕ Rejected"}
+                                color={decisions[p.id] === "ACCEPT" ? "#4ade80" : "#f87171"}
+                              />
+                              <button className="btn" onClick={() => setDecisions(d => { const n = {...d}; delete n[p.id]; return n; })} style={{ background: "transparent", border: "none", color: "#444", fontSize: 10, fontFamily: "monospace", padding: "2px 4px" }}>undo</button>
+                            </div>
+                          ) : (
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button className="btn" onClick={() => setDecisions(d => ({ ...d, [p.id]: "ACCEPT" }))} style={{ background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.3)", color: "#4ade80", padding: "4px 10px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>✓ Accept</button>
+                              <button className="btn" onClick={() => setDecisions(d => ({ ...d, [p.id]: "REJECT" }))} style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.3)", color: "#f87171", padding: "4px 10px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>✕ Reject</button>
+                            </div>
+                          )
+                        )}
+                        {!r && <span style={{ color: "#2a2a2a" }}>—</span>}
+                      </td>
+                      <td style={{ padding: "11px 10px" }}>
                         <div style={{ display: "flex", gap: 5 }}>
                           {!r && s !== "loading" && (
                             <button className="btn" onClick={() => runOne(p)} style={{ background: "transparent", border: "1px solid rgba(232,113,42,0.3)", color: "#E8712A", padding: "4px 9px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>Run</button>
@@ -358,7 +526,6 @@ export default function SessionEvaluator() {
                               {isOpen ? "▲" : "▼"}
                             </button>
                           )}
-                          <button className="btn" onClick={() => removeSession(p.id)} style={{ background: "transparent", border: "1px solid rgba(248,113,113,0.2)", color: "#f87171", padding: "4px 7px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>✕</button>
                         </div>
                       </td>
                     </tr>
@@ -366,11 +533,54 @@ export default function SessionEvaluator() {
                     {/* Expanded Detail */}
                     {isOpen && r && (
                       <tr key={`${p.id}-exp`}>
-                        <td colSpan={12} style={{ padding: "0 10px 22px 40px", background: "rgba(232,113,42,0.02)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 260px", gap: 18, paddingTop: 16 }}>
+                        <td colSpan={14} style={{ padding: "0 10px 22px 40px", background: "rgba(232,113,42,0.02)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 280px", gap: 18, paddingTop: 16 }}>
 
                             {/* Original + evaluation */}
                             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+
+                              {/* Speaker Info */}
+                              <div style={{ padding: "12px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 4 }}>
+                                <div style={{ fontSize: 9, color: "#E8712A", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 8 }}>Speaker</div>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                                  {["name", "email", "company"].map(field => (
+                                    <div key={field}>
+                                      <div style={{ fontSize: 9, color: "#555", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 3 }}>{field}</div>
+                                      <input
+                                        value={speakerInfo[p.id]?.[field] || ""}
+                                        onChange={e => setSpeakerInfo(s => ({ ...s, [p.id]: { ...s[p.id], [field]: e.target.value } }))}
+                                        placeholder={field === "company" ? "Company / website" : `Speaker ${field}`}
+                                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 3, color: "#E8E2D9", fontSize: 11, padding: "6px 8px", fontFamily: "monospace", boxSizing: "border-box" }}
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                                {speakerInfo[p.id]?.email && (
+                                  <button className="btn" onClick={() => navigator.clipboard.writeText(speakerInfo[p.id].email)} style={{ marginTop: 8, background: "transparent", border: "1px solid rgba(232,113,42,0.25)", color: "#E8712A", padding: "4px 10px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>
+                                    Copy Email
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Workflow Status */}
+                              <div style={{ padding: "10px 12px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 4 }}>
+                                <div style={{ fontSize: 9, color: "#E8712A", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 8 }}>Communication Status</div>
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                  {["Pending", "Needs Info", "Accepted", "Rejected", "Waitlisted"].map(status => {
+                                    const statusColors = { Pending: "#94a3b8", "Needs Info": "#fbbf24", Accepted: "#4ade80", Rejected: "#f87171", Waitlisted: "#a78bfa" };
+                                    const isActive = (workflowStatus[p.id] || "Pending") === status;
+                                    return (
+                                      <button key={status} className="btn" onClick={() => setWorkflowStatus(ws => ({ ...ws, [p.id]: status }))} style={{
+                                        background: isActive ? `${statusColors[status]}1a` : "transparent",
+                                        border: `1px solid ${isActive ? statusColors[status] : "rgba(255,255,255,0.1)"}`,
+                                        color: isActive ? statusColors[status] : "#555",
+                                        padding: "4px 10px", fontSize: 10, fontFamily: "monospace", borderRadius: 3
+                                      }}>{status}</button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
                               <div style={{ fontSize: 9, color: "#444", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: "monospace" }}>Original Proposal</div>
                               <div style={{ padding: "12px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 4 }}>
                                 <div style={{ fontSize: 12, fontWeight: 600, color: "#ddd", marginBottom: 5 }}>{p.title}</div>
@@ -459,10 +669,11 @@ export default function SessionEvaluator() {
       {doneCount > 0 && activeTab === "table" && (
         <div style={{ marginTop: 26, padding: "18px 22px", border: "1px solid rgba(232,113,42,0.2)", borderRadius: 5, background: "rgba(232,113,42,0.03)", display: "flex", gap: 32, flexWrap: "wrap", alignItems: "center" }}>
           {[
-            { label: "Accepted", val: accepted, color: "#4ade80" },
-            { label: "Rejected", val: rejected, color: "#f87171" },
-            { label: "Overlaps Flagged", val: overlapSessions.length, color: "#fbbf24" },
-            { label: "Avg Score (Accepted)", color: "#E8E2D9", val: accepted > 0 ? (Object.values(results).filter(r => r.decision === "ACCEPT").reduce((s, r) => s + parseFloat(r.overall), 0) / accepted).toFixed(1) : "—" }
+            { label: "AI Recommends Accept", val: accepted, color: "#4ade80" },
+            { label: "AI Recommends Reject", val: rejected, color: "#f87171" },
+            { label: "Your Accepted", val: Object.values(decisions).filter(d => d === "ACCEPT").length, color: "#4ade80" },
+            { label: "Your Rejected", val: Object.values(decisions).filter(d => d === "REJECT").length, color: "#f87171" },
+            { label: "Overlaps Flagged", val: overlapCount, color: "#fbbf24" },
           ].map(item => (
             <div key={item.label}>
               <div style={{ fontSize: 9, color: "#E8712A", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: "monospace" }}>{item.label}</div>
