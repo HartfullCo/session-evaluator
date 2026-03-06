@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 const DEFAULT_PROPOSALS = [
   { id: 1, title: "From Zero to Clients: The AI Agency Blueprint", abstract: "I'll share how I built an AI agency and how you can too. We'll cover mindset, positioning, and the future of agents. You'll leave inspired and ready to take action." },
@@ -212,6 +212,75 @@ export default function SessionEvaluator() {
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newCompany, setNewCompany] = useState("");
+  const [storageReady, setStorageReady] = useState(false);
+
+  // Load persisted state on mount
+  useEffect(() => {
+    async function loadState() {
+      try {
+        const keys = ["results", "statuses", "notes", "decisions", "speakerInfo", "workflowStatus", "overlapAnalysis", "proposals"];
+        for (const key of keys) {
+          try {
+            const res = await window.storage.get(`evaluator:${key}`, true);
+            if (res?.value) {
+              const val = JSON.parse(res.value);
+              if (key === "results") setResults(val);
+              if (key === "statuses") setStatuses(val);
+              if (key === "notes") setNotes(val);
+              if (key === "decisions") setDecisions(val);
+              if (key === "speakerInfo") setSpeakerInfo(val);
+              if (key === "workflowStatus") setWorkflowStatus(val);
+              if (key === "overlapAnalysis") setOverlapAnalysis(val);
+              if (key === "proposals") setProposals(val);
+            }
+          } catch {}
+        }
+      } catch {}
+      setStorageReady(true);
+    }
+    loadState();
+  }, []);
+
+  // Save state whenever it changes (after initial load)
+  useEffect(() => {
+    if (!storageReady) return;
+    window.storage.set("evaluator:results", JSON.stringify(results), true).catch(() => {});
+  }, [results, storageReady]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    window.storage.set("evaluator:statuses", JSON.stringify(statuses), true).catch(() => {});
+  }, [statuses, storageReady]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    window.storage.set("evaluator:notes", JSON.stringify(notes), true).catch(() => {});
+  }, [notes, storageReady]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    window.storage.set("evaluator:decisions", JSON.stringify(decisions), true).catch(() => {});
+  }, [decisions, storageReady]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    window.storage.set("evaluator:speakerInfo", JSON.stringify(speakerInfo), true).catch(() => {});
+  }, [speakerInfo, storageReady]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    window.storage.set("evaluator:workflowStatus", JSON.stringify(workflowStatus), true).catch(() => {});
+  }, [workflowStatus, storageReady]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    window.storage.set("evaluator:overlapAnalysis", JSON.stringify(overlapAnalysis), true).catch(() => {});
+  }, [overlapAnalysis, storageReady]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    window.storage.set("evaluator:proposals", JSON.stringify(proposals), true).catch(() => {});
+  }, [proposals, storageReady]);
 
   const addSession = () => {
     if (!newTitle.trim() || !newAbstract.trim()) return;
@@ -271,6 +340,13 @@ export default function SessionEvaluator() {
         ::-webkit-scrollbar-thumb { background: #2e2e2e; }
       `}</style>
 
+      {!storageReady && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", color: "#555", fontFamily: "monospace", fontSize: 11, marginBottom: 20 }}>
+          <div style={{ width: 12, height: 12, border: "2px solid #333", borderTopColor: "#E8712A", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          Loading saved state…
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ marginBottom: 26, borderBottom: "1px solid rgba(255,255,255,0.07)", paddingBottom: 22 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
@@ -297,6 +373,18 @@ export default function SessionEvaluator() {
             }}>
               {running ? `Evaluating… ${doneCount}/${proposals.length}` : `▶  Evaluate All ${proposals.length}`}
             </button>
+            <button className="btn" onClick={async () => {
+              if (!confirm("Reset all evaluations, decisions, and notes? This cannot be undone.")) return;
+              setResults({}); setStatuses({}); setNotes({}); setDecisions({});
+              setSpeakerInfo({}); setWorkflowStatus({}); setOverlapAnalysis(null);
+              setProposals(DEFAULT_PROPOSALS);
+              const keys = ["results","statuses","notes","decisions","speakerInfo","workflowStatus","overlapAnalysis","proposals"];
+              for (const k of keys) { try { await window.storage.delete(`evaluator:${k}`, true); } catch {} }
+            }} style={{
+              background: "transparent", border: "1px solid rgba(255,255,255,0.08)",
+              color: "#444", padding: "11px 14px", fontSize: 11,
+              fontFamily: "monospace", borderRadius: 4
+            }}>Reset</button>
           </div>
         </div>
 
