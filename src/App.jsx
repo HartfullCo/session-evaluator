@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 
-const PROPOSALS = [
+const DEFAULT_PROPOSALS = [
   { id: 1, title: "From Zero to Clients: The AI Agency Blueprint", abstract: "I'll share how I built an AI agency and how you can too. We'll cover mindset, positioning, and the future of agents. You'll leave inspired and ready to take action." },
   { id: 2, title: "The Monthly Client Reporting System That Keeps Clients Long-Term", abstract: "A step-by-step system for building an automated monthly reporting workflow: data intake → analysis → insights → client-ready deck/email. Includes what to measure, how to package it, and a template." },
   { id: 3, title: "Top 27 AI Tools for Automation in 2026", abstract: "I'll walk through my favorite tools across agents, RPA, and workflows. You'll see demos of each and get recommendations for which to choose." },
@@ -42,7 +42,19 @@ LEVEL — assign one: Beginner / Intermediate / Advanced
 
 TRACK — assign one of: Offer and Positioning / Client Delivery / Reliability and Ops / Growth and Lead Gen / Agentic Systems
 
-OVERLAP — note if this session closely overlaps with any other common session themes in a 10-session lineup like this. Flag if it should be merged with another, split into beginner and advanced versions, or repositioned by format. Be specific about which session numbers it overlaps with if applicable.
+FORMAT — assign the best-fit format from this list:
+- Case Study: Real client story with documented workflow, results, and what broke
+- Deconstruction: Speaker pulls apart an existing system or workflow live to show how it works
+- Live Build: Speaker builds a real automation from scratch during the session
+- Hands-On Clinic: Guided exercise where attendees build or configure something themselves
+- Workshop: Skill-building with a defined framework, guided exercises, and a completed deliverable
+- Demo: Focused walkthrough of a specific tool or workflow with a clear scoped output
+- Hot Seat: One attendee's real work is reviewed or rebuilt live by the speaker
+- Fireside Chat: Conversational interview with a practitioner around a specific story or result
+- Panel: Multi-speaker discussion — flag if it lacks a concrete throughline or editorial guardrails
+- Office Hours: Open Q&A with a practitioner, best for virtual follow-on sessions
+
+OVERLAP — note if this session closely overlaps with any other common session themes in a multi-session lineup. Flag if it should be merged with another, split into beginner and advanced versions, or repositioned by format. Be specific about which session numbers it overlaps with if applicable.
 
 Respond ONLY with valid JSON. No markdown, no preamble, no backticks. Use this exact structure:
 {
@@ -56,11 +68,13 @@ Respond ONLY with valid JSON. No markdown, no preamble, no backticks. Use this e
   "overall": <average of four scores to one decimal>,
   "level": "Beginner" or "Intermediate" or "Advanced",
   "track": "<one track name>",
+  "format": "<one format name from the list above>",
   "client_value_statement": "<one sentence starting with: This matters because it helps a solo operator deliver>",
   "rejection_reason": "<brief reason if REJECT, otherwise null>",
   "overlap_note": "<specific overlap flag with session numbers if applicable, merge or split recommendation, or null if none>",
   "rewrite": {
     "title": "<sharper, more specific title>",
+    "format": "<one format name from the list above>",
     "who_its_for": "<one sentence: the specific type of solo operator this is designed for and their context>",
     "abstract": "<2 to 3 sentences describing what the session covers and the workflow or system being taught>",
     "youll_leave_with": ["<item 1>", "<item 2>", "<item 3>"]
@@ -70,7 +84,7 @@ Respond ONLY with valid JSON. No markdown, no preamble, no backticks. Use this e
 The youll_leave_with field must be a JSON array of 2 to 4 strings. Name the artifact explicitly as one of the items.`;
 
 async function evaluateProposal(proposal) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetch("/api/claude", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -103,6 +117,11 @@ const Badge = ({ label, color }) => (
 );
 
 const LEVEL_COLORS = { Beginner: "#60a5fa", Intermediate: "#fbbf24", Advanced: "#e879f9" };
+const FORMAT_COLORS = {
+  "Case Study": "#34d399", "Deconstruction": "#60a5fa", "Live Build": "#E8712A",
+  "Hands-On Clinic": "#a78bfa", "Workshop": "#f472b6", "Demo": "#38bdf8",
+  "Hot Seat": "#fb923c", "Fireside Chat": "#86efac", "Panel": "#fbbf24", "Office Hours": "#94a3b8"
+};
 const TRACK_COLORS = {
   "Offer and Positioning": "#34d399",
   "Client Delivery": "#60a5fa",
@@ -119,12 +138,33 @@ const StatusDot = ({ status }) => {
 };
 
 export default function SessionEvaluator() {
+  const [proposals, setProposals] = useState(DEFAULT_PROPOSALS);
   const [results, setResults] = useState({});
   const [statuses, setStatuses] = useState({});
   const [notes, setNotes] = useState({});
   const [expanded, setExpanded] = useState(null);
   const [running, setRunning] = useState(false);
   const [activeTab, setActiveTab] = useState("table");
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newAbstract, setNewAbstract] = useState("");
+
+  const addSession = () => {
+    if (!newTitle.trim() || !newAbstract.trim()) return;
+    const newId = proposals.length > 0 ? Math.max(...proposals.map(p => p.id)) + 1 : 1;
+    setProposals(prev => [...prev, { id: newId, title: newTitle.trim(), abstract: newAbstract.trim() }]);
+    setNewTitle("");
+    setNewAbstract("");
+    setShowAddForm(false);
+  };
+
+  const removeSession = (id) => {
+    setProposals(prev => prev.filter(p => p.id !== id));
+    setResults(r => { const n = {...r}; delete n[id]; return n; });
+    setStatuses(s => { const n = {...s}; delete n[id]; return n; });
+    setNotes(n => { const x = {...n}; delete x[id]; return x; });
+    if (expanded === id) setExpanded(null);
+  };
 
   const runOne = useCallback(async (proposal) => {
     setStatuses(s => ({ ...s, [proposal.id]: "loading" }));
@@ -139,21 +179,21 @@ export default function SessionEvaluator() {
 
   const runAll = useCallback(async () => {
     setRunning(true);
-    for (const p of PROPOSALS) await runOne(p);
+    for (const p of proposals) await runOne(p);
     setRunning(false);
-  }, [runOne]);
+  }, [proposals, runOne]);
 
   const doneCount = Object.values(statuses).filter(s => s === "done").length;
   const accepted = Object.values(results).filter(r => r.decision === "ACCEPT").length;
   const rejected = Object.values(results).filter(r => r.decision === "REJECT").length;
-  const overlapSessions = PROPOSALS.filter(p => results[p.id]?.overlap_note);
+  const overlapSessions = proposals.filter(p => results[p.id]?.overlap_note);
 
   return (
     <div style={{ minHeight: "100vh", background: "#0F0F0F", color: "#E8E2D9", fontFamily: "'Georgia', serif", padding: "36px 28px" }}>
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
-        textarea { resize: vertical; }
-        textarea:focus { outline: none; border-color: rgba(232,113,42,0.5) !important; }
+        textarea, input { resize: vertical; }
+        textarea:focus, input:focus { outline: none; border-color: rgba(232,113,42,0.5) !important; }
         .btn:hover { opacity: 0.8; cursor: pointer; }
         ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-track { background: #1a1a1a; }
@@ -164,24 +204,64 @@ export default function SessionEvaluator() {
       <div style={{ marginBottom: 26, borderBottom: "1px solid rgba(255,255,255,0.07)", paddingBottom: 22 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
           <div>
-            <div style={{ fontSize: 10, color: "#E8712A", letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 6 }}>AI Automation Society · Program Director Test</div>
+            <div style={{ fontSize: 10, color: "#E8712A", letterSpacing: "0.2em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 6 }}>AI Automation Society</div>
             <h1 style={{ margin: 0, fontSize: 25, fontWeight: 400, letterSpacing: "-0.02em" }}>Session Proposal Evaluator</h1>
             <div style={{ marginTop: 6, fontSize: 12, color: "#666", fontFamily: "monospace" }}>
-              {doneCount}/10 evaluated
+              {proposals.length} sessions · {doneCount} evaluated
               {doneCount > 0 && <> · <span style={{ color: "#4ade80" }}>{accepted} accepted</span> · <span style={{ color: "#f87171" }}>{rejected} rejected</span> · <span style={{ color: "#fbbf24" }}>{overlapSessions.length} overlaps</span></>}
             </div>
           </div>
-          <button className="btn" onClick={runAll} disabled={running || doneCount === 10} style={{
-            background: running || doneCount === 10 ? "#1e1e1e" : "#E8712A",
-            color: running || doneCount === 10 ? "#555" : "#fff",
-            border: `1px solid ${running || doneCount === 10 ? "#2a2a2a" : "#E8712A"}`,
-            padding: "11px 22px", fontSize: 12, fontFamily: "monospace",
-            letterSpacing: "0.06em", borderRadius: 4, cursor: running || doneCount === 10 ? "default" : "pointer"
-          }}>
-            {running ? `Evaluating… ${doneCount}/10` : doneCount === 10 ? "✓ All Complete" : "▶  Evaluate All 10"}
-          </button>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="btn" onClick={() => setShowAddForm(v => !v)} style={{
+              background: "transparent", border: "1px solid rgba(232,113,42,0.4)",
+              color: "#E8712A", padding: "11px 18px", fontSize: 12,
+              fontFamily: "monospace", letterSpacing: "0.06em", borderRadius: 4
+            }}>+ Add Session</button>
+            <button className="btn" onClick={runAll} disabled={running || proposals.length === 0} style={{
+              background: running ? "#1e1e1e" : "#E8712A",
+              color: running ? "#555" : "#fff",
+              border: `1px solid ${running ? "#2a2a2a" : "#E8712A"}`,
+              padding: "11px 22px", fontSize: 12, fontFamily: "monospace",
+              letterSpacing: "0.06em", borderRadius: 4, cursor: running ? "default" : "pointer"
+            }}>
+              {running ? `Evaluating… ${doneCount}/${proposals.length}` : `▶  Evaluate All ${proposals.length}`}
+            </button>
+          </div>
         </div>
 
+        {/* Add Session Form */}
+        {showAddForm && (
+          <div style={{ marginTop: 20, padding: "18px 20px", background: "rgba(232,113,42,0.05)", border: "1px solid rgba(232,113,42,0.2)", borderRadius: 5 }}>
+            <div style={{ fontSize: 10, color: "#E8712A", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 12 }}>Add New Session</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input
+                value={newTitle}
+                onChange={e => setNewTitle(e.target.value)}
+                placeholder="Session title"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#E8E2D9", fontSize: 13, padding: "10px 12px", fontFamily: "Georgia, serif", width: "100%", boxSizing: "border-box" }}
+              />
+              <textarea
+                value={newAbstract}
+                onChange={e => setNewAbstract(e.target.value)}
+                placeholder="Session abstract — describe what will be covered, what attendees will build or learn, and what they'll leave with"
+                rows={4}
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#E8E2D9", fontSize: 13, padding: "10px 12px", fontFamily: "Georgia, serif", width: "100%", boxSizing: "border-box" }}
+              />
+              <div style={{ display: "flex", gap: 10 }}>
+                <button className="btn" onClick={addSession} disabled={!newTitle.trim() || !newAbstract.trim()} style={{
+                  background: newTitle.trim() && newAbstract.trim() ? "#E8712A" : "#2a2a2a",
+                  color: newTitle.trim() && newAbstract.trim() ? "#fff" : "#555",
+                  border: "none", padding: "9px 20px", fontSize: 12, fontFamily: "monospace", borderRadius: 4
+                }}>Add to Queue</button>
+                <button className="btn" onClick={() => { setShowAddForm(false); setNewTitle(""); setNewAbstract(""); }} style={{
+                  background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "#888", padding: "9px 16px", fontSize: 12, fontFamily: "monospace", borderRadius: 4
+                }}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tabs */}
         {doneCount > 0 && (
           <div style={{ display: "flex", gap: 4, marginTop: 18 }}>
             {[["table", "All Sessions"], ["overlaps", `Overlaps & Fixes${overlapSessions.length > 0 ? ` (${overlapSessions.length})` : ""}`]].map(([val, label]) => (
@@ -238,13 +318,13 @@ export default function SessionEvaluator() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.09)" }}>
-                {["#", "", "Session Title", "Decision", "Score", "Level", "Track", "Value Ladder", "Actionability", "Proof", "Anti-Fluff", ""].map((h, i) => (
+                {["#", "", "Session Title", "Decision", "Score", "Level", "Format", "Track", "Value Ladder", "Actionability", "Proof", "Anti-Fluff", ""].map((h, i) => (
                   <th key={i} style={{ padding: "8px 10px", textAlign: "left", color: "#444", fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", fontFamily: "monospace", fontWeight: 400, whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {PROPOSALS.map(p => {
+              {proposals.map(p => {
                 const r = results[p.id];
                 const s = statuses[p.id];
                 const isOpen = expanded === p.id;
@@ -263,20 +343,22 @@ export default function SessionEvaluator() {
                         {r ? <span style={{ fontFamily: "monospace", fontSize: 15, fontWeight: 700, color: r.overall >= 4 ? "#4ade80" : r.overall >= 2.5 ? "#fbbf24" : "#f87171" }}>{r.overall}</span> : <span style={{ color: "#2a2a2a" }}>—</span>}
                       </td>
                       <td style={{ padding: "11px 10px" }}>{r?.level ? <Badge label={r.level} color={LEVEL_COLORS[r.level] || "#aaa"} /> : <span style={{ color: "#2a2a2a" }}>—</span>}</td>
+                      <td style={{ padding: "11px 10px" }}>{r?.format ? <Badge label={r.format} color={FORMAT_COLORS[r.format] || "#aaa"} /> : <span style={{ color: "#2a2a2a" }}>—</span>}</td>
                       <td style={{ padding: "11px 10px", maxWidth: 130 }}>{r?.track ? <Badge label={r.track} color={TRACK_COLORS[r.track] || "#aaa"} /> : <span style={{ color: "#2a2a2a" }}>—</span>}</td>
                       {["value_ladder", "actionability", "proof_credibility", "anti_fluff"].map(k => (
                         <td key={k} style={{ padding: "11px 10px" }}>{r ? <ScorePip score={r.scores[k]} /> : <span style={{ color: "#1e1e1e" }}>—</span>}</td>
                       ))}
                       <td style={{ padding: "11px 10px" }}>
-                        <div style={{ display: "flex", gap: 6 }}>
+                        <div style={{ display: "flex", gap: 5 }}>
                           {!r && s !== "loading" && (
                             <button className="btn" onClick={() => runOne(p)} style={{ background: "transparent", border: "1px solid rgba(232,113,42,0.3)", color: "#E8712A", padding: "4px 9px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>Run</button>
                           )}
                           {r && (
                             <button className="btn" onClick={() => setExpanded(isOpen ? null : p.id)} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "#888", padding: "4px 9px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>
-                              {isOpen ? "▲ Hide" : "▼ Details"}
+                              {isOpen ? "▲" : "▼"}
                             </button>
                           )}
+                          <button className="btn" onClick={() => removeSession(p.id)} style={{ background: "transparent", border: "1px solid rgba(248,113,113,0.2)", color: "#f87171", padding: "4px 7px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>✕</button>
                         </div>
                       </td>
                     </tr>
@@ -294,19 +376,16 @@ export default function SessionEvaluator() {
                                 <div style={{ fontSize: 12, fontWeight: 600, color: "#ddd", marginBottom: 5 }}>{p.title}</div>
                                 <div style={{ fontSize: 11, color: "#777", lineHeight: 1.6 }}>{p.abstract}</div>
                               </div>
-
                               <div style={{ padding: "10px 12px", background: "rgba(232,113,42,0.05)", border: "1px solid rgba(232,113,42,0.18)", borderRadius: 4 }}>
                                 <div style={{ fontSize: 9, color: "#E8712A", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 4 }}>Client Value Statement</div>
                                 <div style={{ fontSize: 11, color: "#ddd", lineHeight: 1.55, fontStyle: "italic" }}>{r.client_value_statement}</div>
                               </div>
-
                               {r.rejection_reason && (
                                 <div style={{ padding: "10px 12px", background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.18)", borderRadius: 4 }}>
                                   <div style={{ fontSize: 9, color: "#f87171", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 4 }}>Rejection Reason</div>
                                   <div style={{ fontSize: 11, color: "#fca5a5", lineHeight: 1.55 }}>{r.rejection_reason}</div>
                                 </div>
                               )}
-
                               {r.overlap_note && (
                                 <div style={{ padding: "10px 12px", background: "rgba(251,191,36,0.05)", border: "1px solid rgba(251,191,36,0.18)", borderRadius: 4 }}>
                                   <div style={{ fontSize: 9, color: "#fbbf24", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 4 }}>⚠ Overlap / Fix</div>
@@ -320,30 +399,23 @@ export default function SessionEvaluator() {
                               <div style={{ fontSize: 9, color: "#444", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: "monospace" }}>
                                 {r.decision === "ACCEPT" ? "Publish-Ready Rewrite" : "What This Could Look Like"}
                               </div>
-                              <div style={{
-                                padding: "14px", background: "rgba(255,255,255,0.02)",
-                                border: `1px solid ${r.decision === "ACCEPT" ? "rgba(74,222,128,0.18)" : "rgba(255,255,255,0.05)"}`,
-                                borderRadius: 4, display: "flex", flexDirection: "column", gap: 13, flexGrow: 1
-                              }}>
+                              <div style={{ padding: "14px", background: "rgba(255,255,255,0.02)", border: `1px solid ${r.decision === "ACCEPT" ? "rgba(74,222,128,0.18)" : "rgba(255,255,255,0.05)"}`, borderRadius: 4, display: "flex", flexDirection: "column", gap: 13, flexGrow: 1 }}>
                                 <div style={{ fontSize: 14, fontWeight: 600, color: "#E8E2D9", lineHeight: 1.3 }}>{r.rewrite.title}</div>
-
+                                {r.rewrite.format && (
+                                  <div><Badge label={r.rewrite.format} color={FORMAT_COLORS[r.rewrite.format] || "#aaa"} /></div>
+                                )}
                                 <div>
                                   <div style={{ fontSize: 9, color: "#E8712A", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 3 }}>Who This Is For</div>
                                   <div style={{ fontSize: 11, color: "#bbb", lineHeight: 1.55 }}>{r.rewrite.who_its_for}</div>
                                 </div>
-
                                 <div>
                                   <div style={{ fontSize: 9, color: "#E8712A", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 3 }}>Session Overview</div>
                                   <div style={{ fontSize: 11, color: "#bbb", lineHeight: 1.6 }}>{r.rewrite.abstract}</div>
                                 </div>
-
                                 <div>
                                   <div style={{ fontSize: 9, color: "#E8712A", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 6 }}>You'll Leave With</div>
                                   <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                                    {(Array.isArray(r.rewrite.youll_leave_with)
-                                      ? r.rewrite.youll_leave_with
-                                      : [r.rewrite.youll_leave_with]
-                                    ).map((item, i) => (
+                                    {(Array.isArray(r.rewrite.youll_leave_with) ? r.rewrite.youll_leave_with : [r.rewrite.youll_leave_with]).map((item, i) => (
                                       <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                                         <span style={{ color: "#E8712A", fontSize: 11, marginTop: 1, flexShrink: 0 }}>→</span>
                                         <span style={{ fontSize: 11, color: "#ddd", lineHeight: 1.5 }}>{item}</span>
@@ -360,17 +432,13 @@ export default function SessionEvaluator() {
                               <textarea
                                 value={notes[p.id] || ""}
                                 onChange={e => setNotes(n => ({ ...n, [p.id]: e.target.value }))}
-                                placeholder="Add editorial notes, override decisions, flag for follow-up, draft rewrite edits…"
+                                placeholder="Editorial notes, override decisions, flag for follow-up, rewrite edits…"
                                 rows={9}
-                                style={{
-                                  width: "100%", background: "rgba(255,255,255,0.03)",
-                                  border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4,
-                                  color: "#E8E2D9", fontSize: 12, padding: "10px 12px",
-                                  fontFamily: "monospace", lineHeight: 1.6, boxSizing: "border-box", flexGrow: 1
-                                }}
+                                style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, color: "#E8E2D9", fontSize: 12, padding: "10px 12px", fontFamily: "monospace", lineHeight: 1.6, boxSizing: "border-box", flexGrow: 1 }}
                               />
                               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                                 {r.level && <Badge label={r.level} color={LEVEL_COLORS[r.level] || "#aaa"} />}
+                                {r.format && <Badge label={r.format} color={FORMAT_COLORS[r.format] || "#aaa"} />}
                                 {r.track && <Badge label={r.track} color={TRACK_COLORS[r.track] || "#aaa"} />}
                               </div>
                             </div>
@@ -388,13 +456,13 @@ export default function SessionEvaluator() {
       )}
 
       {/* Summary bar */}
-      {doneCount === 10 && activeTab === "table" && (
+      {doneCount > 0 && activeTab === "table" && (
         <div style={{ marginTop: 26, padding: "18px 22px", border: "1px solid rgba(232,113,42,0.2)", borderRadius: 5, background: "rgba(232,113,42,0.03)", display: "flex", gap: 32, flexWrap: "wrap", alignItems: "center" }}>
           {[
             { label: "Accepted", val: accepted, color: "#4ade80" },
             { label: "Rejected", val: rejected, color: "#f87171" },
             { label: "Overlaps Flagged", val: overlapSessions.length, color: "#fbbf24" },
-            { label: "Avg Score (Accepted)", color: "#E8E2D9", val: (Object.values(results).filter(r => r.decision === "ACCEPT").reduce((s, r) => s + parseFloat(r.overall), 0) / Math.max(1, accepted)).toFixed(1) }
+            { label: "Avg Score (Accepted)", color: "#E8E2D9", val: accepted > 0 ? (Object.values(results).filter(r => r.decision === "ACCEPT").reduce((s, r) => s + parseFloat(r.overall), 0) / accepted).toFixed(1) : "—" }
           ].map(item => (
             <div key={item.label}>
               <div style={{ fontSize: 9, color: "#E8712A", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: "monospace" }}>{item.label}</div>
