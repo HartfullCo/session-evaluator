@@ -1,5 +1,34 @@
 import { useState, useCallback, useEffect } from "react";
 
+// Storage helpers using Netlify Blobs via serverless function
+const storage = {
+  async get(key) {
+    try {
+      const res = await fetch(`/api/storage?action=get&key=${encodeURIComponent(key)}`);
+      const data = await res.json();
+      return data.value ?? null;
+    } catch { return null; }
+  },
+  async set(key, value) {
+    try {
+      await fetch(`/api/storage?action=set&key=${encodeURIComponent(key)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value })
+      });
+    } catch {}
+  },
+  async delete(key) {
+    try {
+      await fetch(`/api/storage?action=delete&key=${encodeURIComponent(key)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+    } catch {}
+  }
+};
+
 const DEFAULT_PROPOSALS = [
   { id: 1, title: "From Zero to Clients: The AI Agency Blueprint", abstract: "I'll share how I built an AI agency and how you can too. We'll cover mindset, positioning, and the future of agents. You'll leave inspired and ready to take action." },
   { id: 2, title: "The Monthly Client Reporting System That Keeps Clients Long-Term", abstract: "A step-by-step system for building an automated monthly reporting workflow: data intake → analysis → insights → client-ready deck/email. Includes what to measure, how to package it, and a template." },
@@ -220,20 +249,17 @@ export default function SessionEvaluator() {
       try {
         const keys = ["results", "statuses", "notes", "decisions", "speakerInfo", "workflowStatus", "overlapAnalysis", "proposals"];
         for (const key of keys) {
-          try {
-            const res = await window.storage.get(`evaluator:${key}`, true);
-            if (res?.value) {
-              const val = JSON.parse(res.value);
-              if (key === "results") setResults(val);
-              if (key === "statuses") setStatuses(val);
-              if (key === "notes") setNotes(val);
-              if (key === "decisions") setDecisions(val);
-              if (key === "speakerInfo") setSpeakerInfo(val);
-              if (key === "workflowStatus") setWorkflowStatus(val);
-              if (key === "overlapAnalysis") setOverlapAnalysis(val);
-              if (key === "proposals") setProposals(val);
-            }
-          } catch {}
+          const val = await storage.get(`evaluator:${key}`);
+          if (val) {
+            if (key === "results") setResults(val);
+            if (key === "statuses") setStatuses(val);
+            if (key === "notes") setNotes(val);
+            if (key === "decisions") setDecisions(val);
+            if (key === "speakerInfo") setSpeakerInfo(val);
+            if (key === "workflowStatus") setWorkflowStatus(val);
+            if (key === "overlapAnalysis") setOverlapAnalysis(val);
+            if (key === "proposals") setProposals(val);
+          }
         }
       } catch {}
       setStorageReady(true);
@@ -241,45 +267,44 @@ export default function SessionEvaluator() {
     loadState();
   }, []);
 
-  // Save state whenever it changes (after initial load)
   useEffect(() => {
     if (!storageReady) return;
-    window.storage.set("evaluator:results", JSON.stringify(results), true).catch(() => {});
+    storage.set("evaluator:results", results);
   }, [results, storageReady]);
 
   useEffect(() => {
     if (!storageReady) return;
-    window.storage.set("evaluator:statuses", JSON.stringify(statuses), true).catch(() => {});
+    storage.set("evaluator:statuses", statuses);
   }, [statuses, storageReady]);
 
   useEffect(() => {
     if (!storageReady) return;
-    window.storage.set("evaluator:notes", JSON.stringify(notes), true).catch(() => {});
+    storage.set("evaluator:notes", notes);
   }, [notes, storageReady]);
 
   useEffect(() => {
     if (!storageReady) return;
-    window.storage.set("evaluator:decisions", JSON.stringify(decisions), true).catch(() => {});
+    storage.set("evaluator:decisions", decisions);
   }, [decisions, storageReady]);
 
   useEffect(() => {
     if (!storageReady) return;
-    window.storage.set("evaluator:speakerInfo", JSON.stringify(speakerInfo), true).catch(() => {});
+    storage.set("evaluator:speakerInfo", speakerInfo);
   }, [speakerInfo, storageReady]);
 
   useEffect(() => {
     if (!storageReady) return;
-    window.storage.set("evaluator:workflowStatus", JSON.stringify(workflowStatus), true).catch(() => {});
+    storage.set("evaluator:workflowStatus", workflowStatus);
   }, [workflowStatus, storageReady]);
 
   useEffect(() => {
     if (!storageReady) return;
-    window.storage.set("evaluator:overlapAnalysis", JSON.stringify(overlapAnalysis), true).catch(() => {});
+    storage.set("evaluator:overlapAnalysis", overlapAnalysis);
   }, [overlapAnalysis, storageReady]);
 
   useEffect(() => {
     if (!storageReady) return;
-    window.storage.set("evaluator:proposals", JSON.stringify(proposals), true).catch(() => {});
+    storage.set("evaluator:proposals", proposals);
   }, [proposals, storageReady]);
 
   const addSession = () => {
@@ -379,7 +404,7 @@ export default function SessionEvaluator() {
               setSpeakerInfo({}); setWorkflowStatus({}); setOverlapAnalysis(null);
               setProposals(DEFAULT_PROPOSALS);
               const keys = ["results","statuses","notes","decisions","speakerInfo","workflowStatus","overlapAnalysis","proposals"];
-              for (const k of keys) { try { await window.storage.delete(`evaluator:${k}`, true); } catch {} }
+              for (const k of keys) await storage.delete(`evaluator:${k}`);
             }} style={{
               background: "transparent", border: "1px solid rgba(255,255,255,0.08)",
               color: "#444", padding: "11px 14px", fontSize: 11,
