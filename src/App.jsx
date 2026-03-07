@@ -255,13 +255,13 @@ export default function SessionEvaluator() {
   useEffect(() => {
     async function loadState() {
       try {
-        // Version check — only wipe AI results if schema has changed, preserve all manual data
         const storedVersion = await storage.get("evaluator:version");
         if (storedVersion !== STORAGE_VERSION) {
           await storage.delete("evaluator:results");
           await storage.delete("evaluator:statuses");
           await storage.set("evaluator:version", STORAGE_VERSION);
         }
+        const keys = ["results", "statuses", "notes", "decisions", "speakerInfo", "workflowStatus", "overlapAnalysis", "proposals"];
         for (const key of keys) {
           const val = await storage.get(`evaluator:${key}`);
           if (val) {
@@ -276,7 +276,9 @@ export default function SessionEvaluator() {
           }
         }
         await storage.set("evaluator:version", STORAGE_VERSION);
-      } catch {}
+      } catch (err) {
+        console.error("loadState error:", err);
+      }
       setStorageReady(true);
     }
     loadState();
