@@ -6,26 +6,31 @@ const storage = {
     try {
       const res = await fetch(`/api/storage?action=get&key=${encodeURIComponent(key)}`);
       const data = await res.json();
+      if (data.error) console.error(`Storage GET ${key}:`, data.error);
       return data.value ?? null;
-    } catch { return null; }
+    } catch (err) { console.error(`Storage GET ${key} failed:`, err); return null; }
   },
   async set(key, value) {
     try {
-      await fetch(`/api/storage?action=set&key=${encodeURIComponent(key)}`, {
+      const res = await fetch(`/api/storage?action=set&key=${encodeURIComponent(key)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value })
       });
-    } catch {}
+      const data = await res.json();
+      if (!data.ok) console.error(`Storage SET ${key}:`, data.error);
+    } catch (err) { console.error(`Storage SET ${key} failed:`, err); }
   },
   async delete(key) {
     try {
-      await fetch(`/api/storage?action=delete&key=${encodeURIComponent(key)}`, {
+      const res = await fetch(`/api/storage?action=delete&key=${encodeURIComponent(key)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({})
       });
-    } catch {}
+      const data = await res.json();
+      if (!data.ok) console.error(`Storage DELETE ${key}:`, data.error);
+    } catch (err) { console.error(`Storage DELETE ${key} failed:`, err); }
   }
 };
 

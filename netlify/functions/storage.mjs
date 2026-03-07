@@ -10,36 +10,48 @@ export default async (req) => {
 
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers });
 
-  try {
-    const store = getStore("evaluator");
-    const url = new URL(req.url);
-    const action = url.searchParams.get("action");
-    const key = url.searchParams.get("key");
+  const store = getStore("evaluator");
+  const url = new URL(req.url);
+  const action = url.searchParams.get("action");
+  const key = url.searchParams.get("key");
 
-    if (req.method === "GET" && action === "get" && key) {
-      try {
-        const value = await store.get(key);
-        return new Response(JSON.stringify({ value }), { status: 200, headers });
-      } catch {
-        return new Response(JSON.stringify({ value: null }), { status: 200, headers });
-      }
+  console.log(`Storage request: ${req.method} action=${action} key=${key}`);
+
+  if (req.method === "GET" && action === "get" && key) {
+    try {
+      const value = await store.get(key, { type: "json" });
+      console.log(`GET ${key}: ${value ? "found" : "not found"}`);
+      return new Response(JSON.stringify({ value }), { status: 200, headers });
+    } catch (err) {
+      console.error(`GET ${key} error:`, err.message);
+      return new Response(JSON.stringify({ value: null, error: err.message }), { status: 200, headers });
     }
-
-    if (req.method === "POST" && action === "set" && key) {
-      const body = await req.json();
-      await store.set(key, body.value);
-      return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
-    }
-
-    if (req.method === "POST" && action === "delete" && key) {
-      await store.delete(key);
-      return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
-    }
-
-    return new Response(JSON.stringify({ error: "Invalid request" }), { status: 400, headers });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers });
   }
+
+  if (req.method === "POST" && action === "set" && key) {
+    try {
+      const body = await req.json();
+      await store.set(key, body.value, { metadata: { updated: Date.now() } });
+      console.log(`SET ${key}: ok`);
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
+    } catch (err) {
+      console.error(`SET ${key} error:`, err.message);
+      return new Response(JSON.stringify({ ok: false, error: err.message }), { status: 500, headers });
+    }
+  }
+
+  if (req.method === "POST" && action === "delete" && key) {
+    try {
+      await store.delete(key);
+      console.log(`DELETE ${key}: ok`);
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
+    } catch (err) {
+      console.error(`DELETE ${key} error:`, err.message);
+      return new Response(JSON.stringify({ ok: false, error: err.message }), { status: 500, headers });
+    }
+  }
+
+  return new Response(JSON.stringify({ error: "Invalid request" }), { status: 400, headers });
 };
 
 export const config = { path: "/api/storage" };
