@@ -343,9 +343,10 @@ export default function SessionEvaluator() {
 
   const runAll = useCallback(async () => {
     setRunning(true);
-    for (const p of proposals) await runOne(p);
+    const unevaluated = proposals.filter(p => !results[p.id]);
+    for (const p of unevaluated) await runOne(p);
     setRunning(false);
-  }, [proposals, runOne]);
+  }, [proposals, results, runOne]);
 
   const handleRunOverlap = useCallback(async () => {
     setRunningOverlap(true);
@@ -400,22 +401,23 @@ export default function SessionEvaluator() {
               color: "#E8712A", padding: "11px 18px", fontSize: 12,
               fontFamily: "monospace", letterSpacing: "0.06em", borderRadius: 4
             }}>+ Add Session</button>
-            <button className="btn" onClick={runAll} disabled={running || proposals.length === 0} style={{
-              background: running ? "#1e1e1e" : "#E8712A",
-              color: running ? "#555" : "#fff",
-              border: `1px solid ${running ? "#2a2a2a" : "#E8712A"}`,
+            <button className="btn" onClick={runAll} disabled={running || proposals.filter(p => !results[p.id]).length === 0} style={{
+              background: running ? "#1e1e1e" : proposals.filter(p => !results[p.id]).length === 0 ? "#1e1e1e" : "#E8712A",
+              color: running || proposals.filter(p => !results[p.id]).length === 0 ? "#555" : "#fff",
+              border: `1px solid ${running || proposals.filter(p => !results[p.id]).length === 0 ? "#2a2a2a" : "#E8712A"}`,
               padding: "11px 22px", fontSize: 12, fontFamily: "monospace",
-              letterSpacing: "0.06em", borderRadius: 4, cursor: running ? "default" : "pointer"
+              letterSpacing: "0.06em", borderRadius: 4, cursor: running || proposals.filter(p => !results[p.id]).length === 0 ? "default" : "pointer"
             }}>
-              {running ? `Evaluating… ${doneCount}/${proposals.length}` : `▶  Evaluate All ${proposals.length}`}
+              {running ? `Evaluating… ${doneCount}/${proposals.filter(p => !results[p.id]).length}` : proposals.filter(p => !results[p.id]).length === 0 ? "✓ All Evaluated" : `▶  Evaluate New (${proposals.filter(p => !results[p.id]).length})`}
             </button>
             <button className="btn" onClick={async () => {
-              if (!confirm("Reset all evaluations, decisions, and notes? This cannot be undone.")) return;
-              setResults({}); setStatuses({}); setNotes({}); setDecisions({});
-              setSpeakerInfo({}); setWorkflowStatus({}); setOverlapAnalysis(null);
-              setProposals(DEFAULT_PROPOSALS);
-              const keys = ["results","statuses","notes","decisions","speakerInfo","workflowStatus","overlapAnalysis","proposals","version"];
-              for (const k of keys) await storage.delete(`evaluator:${k}`);
+              if (!confirm("Reset all AI evaluations? Your notes, decisions, speaker info, and proposals will be preserved.")) return;
+              setResults({});
+              setStatuses({});
+              setOverlapAnalysis(null);
+              await storage.delete("evaluator:results");
+              await storage.delete("evaluator:statuses");
+              await storage.delete("evaluator:overlapAnalysis");
             }} style={{
               background: "transparent", border: "1px solid rgba(255,255,255,0.08)",
               color: "#444", padding: "11px 14px", fontSize: 11,
