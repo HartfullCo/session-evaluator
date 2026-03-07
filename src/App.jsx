@@ -413,6 +413,22 @@ export default function SessionEvaluator() {
           </div>
         </div>
 
+        {/* Legend */}
+        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", margin: "16px 0 8px", padding: "10px 16px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 4, alignItems: "center" }}>
+          <div style={{ fontSize: 9, color: "#444", letterSpacing: "0.15em", textTransform: "uppercase", fontFamily: "monospace" }}>Your Decision</div>
+          {[
+            { icon: "✓", label: "Accept", color: "#4ade80" },
+            { icon: "✕", label: "Reject", color: "#f87171" },
+            { icon: "✎", label: "Minor Revisions — same session, small fixes", color: "#60a5fa" },
+            { icon: "↻", label: "Major Revisions — fundamentally different angle needed", color: "#f59e0b" },
+          ].map(({ icon, label, color }) => (
+            <div key={label} style={{ display: "flex", gap: 7, alignItems: "center" }}>
+              <span style={{ color, fontSize: 12, fontFamily: "monospace", width: 14, textAlign: "center" }}>{icon}</span>
+              <span style={{ fontSize: 11, color: "#666", fontFamily: "monospace" }}>{label}</span>
+            </div>
+          ))}
+        </div>
+
         {/* Add Session Form */}
         {showAddForm && (
           <div style={{ marginTop: 20, padding: "18px 20px", background: "rgba(232,113,42,0.05)", border: "1px solid rgba(232,113,42,0.2)", borderRadius: 5 }}>
