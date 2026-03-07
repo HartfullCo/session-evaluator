@@ -601,7 +601,7 @@ export default function SessionEvaluator() {
                       <td style={{ padding: "11px 10px" }}>{r?.format ? <Badge label={r.format} color={FORMAT_COLORS[r.format] || "#aaa"} /> : <span style={{ color: "#2a2a2a" }}>—</span>}</td>
                       <td style={{ padding: "11px 10px", maxWidth: 130 }}>{r?.track ? <Badge label={r.track} color={TRACK_COLORS[r.track] || "#aaa"} /> : <span style={{ color: "#2a2a2a" }}>—</span>}</td>
                       {["value_ladder", "actionability", "proof_credibility", "anti_fluff"].map(k => (
-                        <td key={k} style={{ padding: "11px 10px" }}>{r ? <ScorePip score={r.scores[k]} /> : <span style={{ color: "#1e1e1e" }}>—</span>}</td>
+                        <td key={k} style={{ padding: "11px 10px" }}>{r ? <ScorePip score={r.scores?.[k]} /> : <span style={{ color: "#1e1e1e" }}>—</span>}</td>
                       ))}
                       <td style={{ padding: "11px 10px" }}>
                         {(() => {
