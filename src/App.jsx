@@ -380,7 +380,7 @@ export default function SessionEvaluator() {
             <h1 style={{ margin: 0, fontSize: 25, fontWeight: 400, letterSpacing: "-0.02em" }}>Session Proposal Evaluator</h1>
             <div style={{ marginTop: 6, fontSize: 12, color: "#666", fontFamily: "monospace" }}>
               {proposals.length} sessions · {doneCount} evaluated
-              {doneCount > 0 && <> · <span style={{ color: "#4ade80" }}>{accepted} accepted</span> · <span style={{ color: "#f87171" }}>{rejected} rejected</span> · <span style={{ color: "#fbbf24" }}>{overlapCount} overlaps</span></>}
+              {doneCount > 0 && <> · <span style={{ color: "#4ade80" }}>{Object.values(decisions).filter(d => d === "ACCEPT").length} accepted</span> · <span style={{ color: "#60a5fa" }}>{Object.values(decisions).filter(d => d === "MINOR").length} minor</span> · <span style={{ color: "#f59e0b" }}>{Object.values(decisions).filter(d => d === "MAJOR").length} major</span> · <span style={{ color: "#f87171" }}>{Object.values(decisions).filter(d => d === "REJECT").length} rejected</span> · <span style={{ color: "#fbbf24" }}>{overlapCount} overlaps</span></>}
             </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
@@ -605,7 +605,7 @@ export default function SessionEvaluator() {
                       ))}
                       <td style={{ padding: "11px 10px" }}>
                         {(() => {
-                          const statusColors = { Pending: "#94a3b8", "Needs Info": "#fbbf24", Accepted: "#4ade80", Rejected: "#f87171", Waitlisted: "#a78bfa" };
+                          const statusColors = { Pending: "#94a3b8", "Needs Info": "#fbbf24", "Minor Edits Requested": "#60a5fa", "Redirection Sent": "#f59e0b", Accepted: "#4ade80", Rejected: "#f87171", Waitlisted: "#a78bfa" };
                           const ws = workflowStatus[p.id] || (r ? "Pending" : null);
                           return ws ? <Badge label={ws} color={statusColors[ws]} /> : <span style={{ color: "#2a2a2a" }}>—</span>;
                         })()}
@@ -615,15 +615,17 @@ export default function SessionEvaluator() {
                           decisions[p.id] ? (
                             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                               <Badge
-                                label={decisions[p.id] === "ACCEPT" ? "✓ Accepted" : "✕ Rejected"}
-                                color={decisions[p.id] === "ACCEPT" ? "#4ade80" : "#f87171"}
+                                label={decisions[p.id] === "ACCEPT" ? "✓ Accepted" : decisions[p.id] === "REJECT" ? "✕ Rejected" : decisions[p.id] === "MINOR" ? "✎ Minor Revisions" : "↻ Major Revisions"}
+                                color={decisions[p.id] === "ACCEPT" ? "#4ade80" : decisions[p.id] === "REJECT" ? "#f87171" : decisions[p.id] === "MINOR" ? "#60a5fa" : "#f59e0b"}
                               />
                               <button className="btn" onClick={() => setDecisions(d => { const n = {...d}; delete n[p.id]; return n; })} style={{ background: "transparent", border: "none", color: "#444", fontSize: 10, fontFamily: "monospace", padding: "2px 4px" }}>undo</button>
                             </div>
                           ) : (
-                            <div style={{ display: "flex", gap: 6 }}>
-                              <button className="btn" onClick={() => setDecisions(d => ({ ...d, [p.id]: "ACCEPT" }))} style={{ background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.3)", color: "#4ade80", padding: "4px 10px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>✓ Accept</button>
-                              <button className="btn" onClick={() => setDecisions(d => ({ ...d, [p.id]: "REJECT" }))} style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.3)", color: "#f87171", padding: "4px 10px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>✕ Reject</button>
+                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                              <button className="btn" onClick={() => setDecisions(d => ({ ...d, [p.id]: "ACCEPT" }))} style={{ background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.3)", color: "#4ade80", padding: "4px 8px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>✓</button>
+                              <button className="btn" onClick={() => setDecisions(d => ({ ...d, [p.id]: "REJECT" }))} style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.3)", color: "#f87171", padding: "4px 8px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>✕</button>
+                              <button className="btn" onClick={() => setDecisions(d => ({ ...d, [p.id]: "MINOR" }))} style={{ background: "rgba(96,165,250,0.1)", border: "1px solid rgba(96,165,250,0.3)", color: "#60a5fa", padding: "4px 8px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>✎</button>
+                              <button className="btn" onClick={() => setDecisions(d => ({ ...d, [p.id]: "MAJOR" }))} style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", color: "#f59e0b", padding: "4px 8px", fontSize: 10, fontFamily: "monospace", borderRadius: 3 }}>↻</button>
                             </div>
                           )
                         )}
@@ -679,8 +681,8 @@ export default function SessionEvaluator() {
                               <div style={{ padding: "10px 12px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 4 }}>
                                 <div style={{ fontSize: 9, color: "#E8712A", letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "monospace", marginBottom: 8 }}>Communication Status</div>
                                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                  {["Pending", "Needs Info", "Accepted", "Rejected", "Waitlisted"].map(status => {
-                                    const statusColors = { Pending: "#94a3b8", "Needs Info": "#fbbf24", Accepted: "#4ade80", Rejected: "#f87171", Waitlisted: "#a78bfa" };
+                                  {["Pending", "Needs Info", "Minor Edits Requested", "Redirection Sent", "Accepted", "Rejected", "Waitlisted"].map(status => {
+                                    const statusColors = { Pending: "#94a3b8", "Needs Info": "#fbbf24", "Minor Edits Requested": "#60a5fa", "Redirection Sent": "#f59e0b", Accepted: "#4ade80", Rejected: "#f87171", Waitlisted: "#a78bfa" };
                                     const isActive = (workflowStatus[p.id] || "Pending") === status;
                                     return (
                                       <button key={status} className="btn" onClick={() => setWorkflowStatus(ws => ({ ...ws, [p.id]: status }))} style={{
@@ -785,6 +787,8 @@ export default function SessionEvaluator() {
             { label: "AI Recommends Accept", val: accepted, color: "#4ade80" },
             { label: "AI Recommends Reject", val: rejected, color: "#f87171" },
             { label: "Your Accepted", val: Object.values(decisions).filter(d => d === "ACCEPT").length, color: "#4ade80" },
+            { label: "Minor Revisions", val: Object.values(decisions).filter(d => d === "MINOR").length, color: "#60a5fa" },
+            { label: "Major Revisions", val: Object.values(decisions).filter(d => d === "MAJOR").length, color: "#f59e0b" },
             { label: "Your Rejected", val: Object.values(decisions).filter(d => d === "REJECT").length, color: "#f87171" },
             { label: "Overlaps Flagged", val: overlapCount, color: "#fbbf24" },
           ].map(item => (
