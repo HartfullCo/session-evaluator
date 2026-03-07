@@ -29,7 +29,10 @@ const storage = {
   }
 };
 
-const DEFAULT_PROPOSALS = [
+// Bump this version any time the results data shape changes
+const STORAGE_VERSION = "v4";
+
+
   { id: 1, title: "From Zero to Clients: The AI Agency Blueprint", abstract: "I'll share how I built an AI agency and how you can too. We'll cover mindset, positioning, and the future of agents. You'll leave inspired and ready to take action." },
   { id: 2, title: "The Monthly Client Reporting System That Keeps Clients Long-Term", abstract: "A step-by-step system for building an automated monthly reporting workflow: data intake → analysis → insights → client-ready deck/email. Includes what to measure, how to package it, and a template." },
   { id: 3, title: "Top 27 AI Tools for Automation in 2026", abstract: "I'll walk through my favorite tools across agents, RPA, and workflows. You'll see demos of each and get recommendations for which to choose." },
@@ -247,7 +250,14 @@ export default function SessionEvaluator() {
   useEffect(() => {
     async function loadState() {
       try {
-        const keys = ["results", "statuses", "notes", "decisions", "speakerInfo", "workflowStatus", "overlapAnalysis", "proposals"];
+        // Version check — only wipe AI results if schema has changed, preserve all manual data
+        const storedVersion = await storage.get("evaluator:version");
+        if (storedVersion !== STORAGE_VERSION) {
+          await storage.delete("evaluator:results");
+          await storage.delete("evaluator:statuses");
+          await storage.set("evaluator:version", STORAGE_VERSION);
+          // Continue loading — notes, decisions, speaker info, proposals all preserved
+        }
         for (const key of keys) {
           const val = await storage.get(`evaluator:${key}`);
           if (val) {
@@ -261,6 +271,7 @@ export default function SessionEvaluator() {
             if (key === "proposals") setProposals(val);
           }
         }
+        await storage.set("evaluator:version", STORAGE_VERSION);
       } catch {}
       setStorageReady(true);
     }
@@ -403,7 +414,7 @@ export default function SessionEvaluator() {
               setResults({}); setStatuses({}); setNotes({}); setDecisions({});
               setSpeakerInfo({}); setWorkflowStatus({}); setOverlapAnalysis(null);
               setProposals(DEFAULT_PROPOSALS);
-              const keys = ["results","statuses","notes","decisions","speakerInfo","workflowStatus","overlapAnalysis","proposals"];
+              const keys = ["results","statuses","notes","decisions","speakerInfo","workflowStatus","overlapAnalysis","proposals","version"];
               for (const k of keys) await storage.delete(`evaluator:${k}`);
             }} style={{
               background: "transparent", border: "1px solid rgba(255,255,255,0.08)",
