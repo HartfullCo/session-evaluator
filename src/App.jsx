@@ -32,7 +32,7 @@ const storage = {
 // Bump this version any time the results data shape changes
 const STORAGE_VERSION = "v4";
 
-
+const DEFAULT_PROPOSALS = [
   { id: 1, title: "From Zero to Clients: The AI Agency Blueprint", abstract: "I'll share how I built an AI agency and how you can too. We'll cover mindset, positioning, and the future of agents. You'll leave inspired and ready to take action." },
   { id: 2, title: "The Monthly Client Reporting System That Keeps Clients Long-Term", abstract: "A step-by-step system for building an automated monthly reporting workflow: data intake → analysis → insights → client-ready deck/email. Includes what to measure, how to package it, and a template." },
   { id: 3, title: "Top 27 AI Tools for Automation in 2026", abstract: "I'll walk through my favorite tools across agents, RPA, and workflows. You'll see demos of each and get recommendations for which to choose." },
