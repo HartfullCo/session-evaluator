@@ -261,7 +261,6 @@ export default function SessionEvaluator() {
           await storage.delete("evaluator:results");
           await storage.delete("evaluator:statuses");
           await storage.set("evaluator:version", STORAGE_VERSION);
-          // Continue loading — notes, decisions, speaker info, proposals all preserved
         }
         for (const key of keys) {
           const val = await storage.get(`evaluator:${key}`);

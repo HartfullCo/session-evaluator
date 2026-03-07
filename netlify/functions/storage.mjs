@@ -20,18 +20,18 @@ export default async (req) => {
   if (req.method === "GET" && action === "get" && key) {
     try {
       const value = await store.get(key, { type: "json" });
-      console.log(`GET ${key}: ${value ? "found" : "not found"}`);
-      return new Response(JSON.stringify({ value }), { status: 200, headers });
+      console.log(`GET ${key}: ${value !== null ? "found" : "not found"}`);
+      return new Response(JSON.stringify({ value: value ?? null }), { status: 200, headers });
     } catch (err) {
       console.error(`GET ${key} error:`, err.message);
-      return new Response(JSON.stringify({ value: null, error: err.message }), { status: 200, headers });
+      return new Response(JSON.stringify({ value: null }), { status: 200, headers });
     }
   }
 
   if (req.method === "POST" && action === "set" && key) {
     try {
       const body = await req.json();
-      await store.set(key, body.value, { metadata: { updated: Date.now() } });
+      await store.setJSON(key, body.value);
       console.log(`SET ${key}: ok`);
       return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
     } catch (err) {
